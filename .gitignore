@@ -1,0 +1,57 @@
+# ── Secrets & credentials ────────────────────────────────────────────────────
+.env
+.env.*
+*.json.key
+*-credentials.json
+*-service-account.json
+gcp_key.json
+bq_key.json
+credentials/
+
+# ── Data files (never commit 900MB CSVs) ─────────────────────────────────────
+data/
+*.csv
+*.parquet
+*.feather
+*.pkl
+*.pickle
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Jupyter / Colab ───────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── VSCode ────────────────────────────────────────────────────────────────────
+.vscode/
+*.code-workspace
+
+# ── OS noise ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs & temp ───────────────────────────────────────────────────────────────
+*.log
+logs/
+tmp/
+temp/
+airflow/logs/
+airflow/plugins/
+
+# ── Test outputs ─────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/

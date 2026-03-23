@@ -1,0 +1,8 @@
+pandas
+numpy
+psycopg2-binary
+google-cloud-bigquery
+google-cloud-bigquery-storage
+pyarrow
+db-dtypes
+python-dotenv
