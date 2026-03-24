@@ -81,15 +81,17 @@ Underwriting Decision Engine
 │  borrower_sms_features table                                    │
 │  • Underwriting API lookup (< 50ms)                             │
 │  • Metabase dashboard monitoring                                │
-│  • Airflow DAG: daily refresh at 02:00 IST                      │
+│  • run_full_pipeline.py: manual or cron-scheduled refresh       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Orchestration:** Apache Airflow DAG (`sms_feature_pipeline`) with 4 tasks:
+**Orchestration (local):** `run_full_pipeline.py` runs all 4 steps sequentially:
 
 ```
 ingest_raw_sms → classify_sms → build_features → validate_output
 ```
+
+> **Production note:** In a production deployment this pipeline would be scheduled via Apache Airflow or AWS MWAA. The Airflow DAG definition (with retry logic, task dependencies, and a data quality gate) is included in `pipeline/02_pipeline.py` as a reference implementation — it was not executed as part of this assignment.
 
 ---
 
@@ -100,7 +102,7 @@ sms-pipeline/
 │
 ├── pipeline/
 │   ├── 01_privacy_and_filtering.py       # Part 1 & 2: PII masking + keyword classifier
-│   ├── 02_pipeline.py                    # Part 3: Ingestion, DDL, Airflow DAG
+│   ├── 02_pipeline.py                    # Part 3: Ingestion, DDL, Airflow DAG (production design reference)
 │   ├── 03_feature_engineering.py         # Part 4: 35-feature computation (Pandas + BigQuery SQL)
 │   ├── 04_feature_table_and_sql.sql      # Part 5 & 6: Full DDL + SMS tagging VIEWs
 │   └── 05_validation_and_explanation.py  # Part 6: Count validation + underwriting explainer
@@ -248,8 +250,7 @@ PostgreSQL  →  DuckDB  →  BigQuery
 (primary)     (local)     (analytics)
 ```
 
-Chunked ingestion at 50K rows/batch safely handles files of 900MB+.
-Airflow DAG (`sms_feature_pipeline`) runs daily at 02:00 IST with retry logic and a data quality gate task.
+Chunked ingestion at 50K rows/batch safely handles files of 900MB+. All steps are orchestrated by `run_full_pipeline.py` which auto-detects the best available backend and runs ingestion → classification → feature engineering → validation in sequence.
 
 ### Part 4 — Feature Engineering
 
@@ -339,15 +340,15 @@ Tested on the full dataset: **2,953,496 rows × 1,000 borrowers**
 
 ## Stack
 
-| Component          | Technology             |
-| ------------------ | ---------------------- |
-| Language           | Python 3.10            |
-| Local analytics DB | DuckDB                 |
-| Operational DB     | PostgreSQL 15 (Docker) |
-| Cloud analytics    | Google BigQuery        |
-| Orchestration      | Apache Airflow         |
-| Data processing    | Pandas, NumPy          |
-| Dashboarding       | Metabase               |
+| Component                         | Technology                                          |
+| --------------------------------- | --------------------------------------------------- |
+| Language                          | Python 3.10                                         |
+| Local analytics DB                | DuckDB                                              |
+| Operational DB                    | PostgreSQL 15 (Docker)                              |
+| Cloud analytics                   | Google BigQuery                                     |
+| Orchestration (production design) | Apache Airflow / AWS MWAA (DAG in `02_pipeline.py`) |
+| Data processing                   | Pandas, NumPy                                       |
+| Dashboarding                      | Metabase                                            |
 
 ---
 
