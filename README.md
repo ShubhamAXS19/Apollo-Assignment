@@ -58,7 +58,7 @@ Underwriting Decision Engine
 │                     INGESTION LAYER                             │
 │  • Chunked CSV ingestion (50K rows/batch — handles 900MB+)      │
 │  • Deduplication on (borrower_id, inbox_time_ms)                │
-│  • Writes to: PostgreSQL (dev) / DuckDB (local) / BigQuery      │
+│  • Writes to: PostgreSQL / DuckDB / BigQuery / Athena (S3)      │
 └─────────────────────┬───────────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────────┐
@@ -107,7 +107,7 @@ sms-pipeline/
 │   ├── 04_feature_table_and_sql.sql      # Part 5 & 6: Full DDL + SMS tagging VIEWs
 │   └── 05_validation_and_explanation.py  # Part 6: Count validation + underwriting explainer
 │
-├── run_full_pipeline.py      # Main runner (postgres / duckdb / bigquery)
+├── run_full_pipeline.py      # Main runner (duckdb / postgres / bigquery / athena)
 ├── test_smoke.py             # Unit tests for classifier + features
 │
 ├── requirements.txt
@@ -123,7 +123,7 @@ sms-pipeline/
 ### Prerequisites
 
 - Python 3.10+
-- One of: DuckDB (local, zero setup), PostgreSQL (Docker), or BigQuery (GCP)
+- One of: DuckDB (local, zero setup), PostgreSQL (Docker), BigQuery (GCP), or Athena (AWS)
 
 ### 1. Clone & install
 
@@ -147,11 +147,24 @@ cp .env.example .env
 SMS_CSV_PATH=/path/to/sms_data.csv
 
 # Choose one backend:
+
+# DuckDB (local — no cloud needed)
+DUCKDB_PATH=data/sms_pipeline.duckdb
+
+# PostgreSQL (Docker)
 PG_CONN=postgresql://postgres:password@localhost:5432/sms_db
+
+# BigQuery (GCP)
 GOOGLE_APPLICATION_CREDENTIALS=/path/to/bq_key.json
 BQ_PROJECT=your-gcp-project-id
 BQ_DATASET=sms_pipeline
-DUCKDB_PATH=data/sms_pipeline.duckdb
+
+# Athena (AWS)
+AWS_ACCESS_KEY_ID=your-access-key-id
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
+AWS_REGION=ap-south-1
+ATHENA_S3_BUCKET=your-s3-bucket-name
+ATHENA_DATABASE=sms_pipeline
 ```
 
 ### 3. Run smoke test (no CSV needed)
@@ -186,6 +199,7 @@ python run_full_pipeline.py
 python run_full_pipeline.py --backend duckdb     # fully local, no cloud needed
 python run_full_pipeline.py --backend postgres   # requires Docker
 python run_full_pipeline.py --backend bigquery   # requires GCP credentials
+python run_full_pipeline.py --backend athena     # requires AWS credentials + S3 bucket
 ```
 
 ### 5. Query results
@@ -243,12 +257,19 @@ No PII ever leaves the device in raw form:
 
 ### Part 3 — Data Pipeline
 
-Three backends with automatic detection and fallback:
+Four backends with automatic detection and fallback:
 
 ```
-PostgreSQL  →  DuckDB  →  BigQuery
-(primary)     (local)     (analytics)
+DuckDB      →  PostgreSQL  →  BigQuery  →  Athena
+(local)        (Docker)       (GCP)         (AWS)
 ```
+
+| Backend    | Requires                    | Best for                                  |
+| ---------- | --------------------------- | ----------------------------------------- |
+| `duckdb`   | Nothing — zero setup        | Local testing, reviewers running the code |
+| `postgres` | Docker running              | Local operational DB                      |
+| `bigquery` | GCP service account JSON    | GCP-based production                      |
+| `athena`   | AWS credentials + S3 bucket | AWS-based production                      |
 
 Chunked ingestion at 50K rows/batch safely handles files of 900MB+. All steps are orchestrated by `run_full_pipeline.py` which auto-detects the best available backend and runs ingestion → classification → feature engineering → validation in sequence.
 
@@ -345,9 +366,10 @@ Tested on the full dataset: **2,953,496 rows × 1,000 borrowers**
 | Language                          | Python 3.10                                         |
 | Local analytics DB                | DuckDB                                              |
 | Operational DB                    | PostgreSQL 15 (Docker)                              |
-| Cloud analytics                   | Google BigQuery                                     |
+| Cloud analytics (GCP)             | Google BigQuery                                     |
+| Cloud analytics (AWS)             | Amazon Athena + S3                                  |
 | Orchestration (production design) | Apache Airflow / AWS MWAA (DAG in `02_pipeline.py`) |
-| Data processing                   | Pandas, NumPy                                       |
+| Data processing                   | Pandas, NumPy, PyArrow                              |
 | Dashboarding                      | Metabase                                            |
 
 ---

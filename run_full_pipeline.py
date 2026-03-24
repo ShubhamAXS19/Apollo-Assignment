@@ -1,16 +1,25 @@
 """
 run_full_pipeline.py
 =====================
-Runs the full SMS pipeline with three backend options:
-  1. PostgreSQL (Docker)  — primary
-  2. DuckDB               — local fallback (no cloud needed)
-  3. BigQuery             — production analytics
+Runs the full SMS pipeline with four backend options:
+  1. DuckDB               — local fallback (no cloud needed)
+  2. PostgreSQL (Docker)  — local operational DB
+  3. BigQuery (GCP)       — cloud analytics
+  4. Athena (AWS)         — cloud analytics
 
 Usage:
     python run_full_pipeline.py --backend duckdb
     python run_full_pipeline.py --backend postgres
     python run_full_pipeline.py --backend bigquery
+    python run_full_pipeline.py --backend athena
     python run_full_pipeline.py              # auto-detects best available
+
+Setup per backend:
+  DuckDB:   pip install duckdb  (zero config)
+  Postgres: Docker running + PG_CONN in .env
+  BigQuery: GOOGLE_APPLICATION_CREDENTIALS + BQ_PROJECT + BQ_DATASET in .env
+  Athena:   AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY + AWS_REGION +
+            ATHENA_S3_BUCKET + ATHENA_DATABASE in .env
 """
 
 import os
@@ -35,12 +44,19 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ── Config (edit these if needed) ────────────────────────────────────────────
-CSV_PATH   = os.getenv("SMS_CSV_PATH", "/Users/shubham/Desktop/Apollo/data/1k_sample_raw_sms_data (1).csv")
+CSV_PATH   = os.getenv("SMS_CSV_PATH", "data/sms_data.csv")
 PG_CONN    = os.getenv("PG_CONN",      "postgresql://postgres:yourpassword@localhost:5432/sms_db")
 BQ_PROJECT = os.getenv("BQ_PROJECT",   "your-gcp-project-id")
 BQ_DATASET = os.getenv("BQ_DATASET",   "sms_pipeline")
 DUCKDB_PATH= os.getenv("DUCKDB_PATH",  "data/sms_pipeline.duckdb")
 CHUNK_SIZE = 50_000
+
+# ── AWS / Athena config ───────────────────────────────────────────────────────
+AWS_ACCESS_KEY_ID     = os.getenv("AWS_ACCESS_KEY_ID",     "")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+AWS_REGION            = os.getenv("AWS_REGION",            "ap-south-1")   # Mumbai
+ATHENA_S3_BUCKET      = os.getenv("ATHENA_S3_BUCKET",      "")             # e.g. sms-pipeline-bucket
+ATHENA_DATABASE       = os.getenv("ATHENA_DATABASE",       "sms_pipeline")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -71,11 +87,20 @@ def detect_backend() -> str:
     try:
         from google.cloud import bigquery
         creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        if creds and Path(creds).exists():
+        if creds and Path(creds).exists() and BQ_PROJECT != "your-gcp-project-id":
             log.info("✅ BigQuery credentials found — using bigquery backend")
             return "bigquery"
     except ImportError:
         pass
+
+    # Try Athena
+    if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY and ATHENA_S3_BUCKET:
+        try:
+            import boto3
+            log.info("✅ AWS credentials found — using athena backend")
+            return "athena"
+        except ImportError:
+            log.warning("boto3 not installed. Run: pip install boto3 pyathena")
 
     raise RuntimeError("No backend available. Install duckdb: pip install duckdb")
 
@@ -311,49 +336,302 @@ def run_postgres(csv_path: str):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# BACKEND: BigQuery
+# BACKEND: BigQuery (GCP)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def run_bigquery(csv_path: str):
+    """
+    Writes classified SMS and borrower features to Google BigQuery.
+
+    Prerequisites:
+        pip install google-cloud-bigquery google-cloud-bigquery-storage pyarrow db-dtypes
+
+    .env keys needed:
+        GOOGLE_APPLICATION_CREDENTIALS=/path/to/bq_key.json
+        BQ_PROJECT=your-gcp-project-id
+        BQ_DATASET=sms_pipeline
+    """
     from google.cloud import bigquery
 
-    client = bigquery.Client(project=BQ_PROJECT)
+    # Validate credentials
+    creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+    if not creds or not Path(creds).exists():
+        raise FileNotFoundError(
+            f"BigQuery credentials not found at: {creds}\n"
+            "Set GOOGLE_APPLICATION_CREDENTIALS in your .env file.\n"
+            "Get a service account JSON from: console.cloud.google.com/iam-admin/serviceaccounts"
+        )
+    if BQ_PROJECT == "your-gcp-project-id":
+        raise ValueError("Set BQ_PROJECT to your actual GCP project ID in .env")
+
+    client      = bigquery.Client(project=BQ_PROJECT)
     dataset_ref = f"{BQ_PROJECT}.{BQ_DATASET}"
 
-    # Create dataset if needed
-    client.create_dataset(dataset_ref, exists_ok=True)
+    # Create dataset if it doesn't exist
+    dataset = bigquery.Dataset(dataset_ref)
+    dataset.location = "US"
+    client.create_dataset(dataset, exists_ok=True)
     log.info(f"BigQuery dataset: {dataset_ref}")
 
+    # ── Step 1: Classify SMS ──────────────────────────────────────────────
     log.info("Step 1: Classifying SMS from CSV...")
     df_classified = load_and_classify_csv(csv_path)
     if df_classified.empty:
         log.error("No rows classified.")
         return
 
+    # ── Step 2: Write sms_classified to BigQuery ──────────────────────────
     log.info("Step 2: Writing classified SMS to BigQuery...")
+
+    # BigQuery doesn't support Python list columns — convert to JSON string
+    df_bq = df_classified.copy()
+    df_bq["categories"] = df_bq["categories"].apply(
+        lambda x: x if isinstance(x, str) else json.dumps(x)
+    )
+    # Convert date objects to strings for BQ compatibility
+    if "txn_date" in df_bq.columns:
+        df_bq["txn_date"] = df_bq["txn_date"].astype(str)
+
+    job_config = bigquery.LoadJobConfig(
+        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+        autodetect=True,
+    )
     job = client.load_table_from_dataframe(
-        df_classified,
-        f"{dataset_ref}.sms_classified",
-        job_config=bigquery.LoadJobConfig(
-            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE
-        )
+        df_bq, f"{dataset_ref}.sms_classified", job_config=job_config
     )
     job.result()
-    log.info(f"  {len(df_classified):,} rows written to sms_classified")
+    log.info(f"  ✅ {len(df_bq):,} rows written to {dataset_ref}.sms_classified")
 
-    log.info("Step 3: Building features...")
+    # ── Step 3: Build features ────────────────────────────────────────────
+    log.info("Step 3: Building borrower features...")
     features = build_features(df_classified)
 
+    # Sanitise features for BigQuery (convert dates, booleans)
+    feat_bq = features.copy()
+    for col in feat_bq.select_dtypes(include=["object"]).columns:
+        feat_bq[col] = feat_bq[col].astype(str)
+    for col in feat_bq.select_dtypes(include=["datetime64"]).columns:
+        feat_bq[col] = feat_bq[col].astype(str)
+
+    job2_config = bigquery.LoadJobConfig(
+        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+        autodetect=True,
+    )
     job2 = client.load_table_from_dataframe(
-        features,
-        f"{dataset_ref}.borrower_sms_features",
-        job_config=bigquery.LoadJobConfig(
-            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE
-        )
+        feat_bq, f"{dataset_ref}.borrower_sms_features", job_config=job2_config
     )
     job2.result()
-    log.info(f"  {len(features):,} rows written to borrower_sms_features")
-    log.info(f"✅ BigQuery pipeline complete. Check: {dataset_ref}")
+    log.info(f"  ✅ {len(feat_bq):,} rows written to {dataset_ref}.borrower_sms_features")
+
+    # ── Step 4: Validation summary via BQ SQL ────────────────────────────
+    log.info("Step 4: Validation summary...")
+    print("\n" + "=" * 60)
+    print("RISK FLAG DISTRIBUTION  (BigQuery)")
+    print("=" * 60)
+    query = f"""
+        SELECT risk_flag,
+               COUNT(*)                                           AS borrowers,
+               ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER(), 1) AS pct
+        FROM `{dataset_ref}.borrower_sms_features`
+        GROUP BY 1
+        ORDER BY 2 DESC
+    """
+    print(client.query(query).to_dataframe().to_string(index=False))
+
+    print("\n" + "=" * 60)
+    print("SMS CATEGORY BREAKDOWN  (BigQuery)")
+    print("=" * 60)
+    query2 = f"""
+        SELECT sender_tag, COUNT(*) AS sms_count
+        FROM `{dataset_ref}.sms_classified`
+        GROUP BY 1
+        ORDER BY 2 DESC
+    """
+    print(client.query(query2).to_dataframe().to_string(index=False))
+
+    log.info(f"\n✅ BigQuery pipeline complete.")
+    log.info(f"   View tables at: console.cloud.google.com/bigquery?project={BQ_PROJECT}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BACKEND: AWS Athena
+# ══════════════════════════════════════════════════════════════════════════════
+
+def run_athena(csv_path: str):
+    """
+    Uploads classified SMS and features to S3, then registers them
+    as Athena tables for SQL querying.
+
+    Prerequisites:
+        pip install boto3 pyathena pandas
+
+    .env keys needed:
+        AWS_ACCESS_KEY_ID=your-access-key
+        AWS_SECRET_ACCESS_KEY=your-secret-key
+        AWS_REGION=ap-south-1
+        ATHENA_S3_BUCKET=your-s3-bucket-name    # must already exist
+        ATHENA_DATABASE=sms_pipeline
+
+    How to create the S3 bucket (one-time):
+        aws s3 mb s3://your-bucket-name --region ap-south-1
+    Or via AWS console: S3 → Create bucket → choose a unique name.
+    """
+    import boto3
+    import pyathena
+    from pyathena import connect as athena_connect
+
+    # Validate config
+    if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
+        raise ValueError(
+            "AWS credentials missing. Set AWS_ACCESS_KEY_ID and "
+            "AWS_SECRET_ACCESS_KEY in your .env file.\n"
+            "Get them from: console.aws.amazon.com/iam → Users → Security credentials"
+        )
+    if not ATHENA_S3_BUCKET:
+        raise ValueError(
+            "ATHENA_S3_BUCKET not set in .env.\n"
+            "Create a bucket at console.aws.amazon.com/s3 and set its name."
+        )
+
+    # S3 paths
+    S3_PREFIX         = f"s3://{ATHENA_S3_BUCKET}/sms-pipeline"
+    S3_CLASSIFIED     = f"{S3_PREFIX}/sms_classified/"
+    S3_FEATURES       = f"{S3_PREFIX}/borrower_sms_features/"
+    S3_ATHENA_RESULTS = f"{S3_PREFIX}/athena-results/"
+
+    # Boto3 clients
+    s3_client = boto3.client(
+        "s3",
+        region_name            = AWS_REGION,
+        aws_access_key_id      = AWS_ACCESS_KEY_ID,
+        aws_secret_access_key  = AWS_SECRET_ACCESS_KEY,
+    )
+
+    def upload_df_to_s3(df: pd.DataFrame, s3_path: str, name: str):
+        """Save DataFrame as Parquet and upload to S3."""
+        import io
+        buf = io.BytesIO()
+        df.to_parquet(buf, index=False, engine="pyarrow")
+        buf.seek(0)
+        bucket, key = s3_path.replace("s3://", "").split("/", 1)
+        key = key + "data.parquet"
+        s3_client.put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
+        log.info(f"  ✅ {len(df):,} rows uploaded to s3://{bucket}/{key}")
+
+    # ── Step 1: Classify SMS ──────────────────────────────────────────────
+    log.info("Step 1: Classifying SMS from CSV...")
+    df_classified = load_and_classify_csv(csv_path)
+    if df_classified.empty:
+        log.error("No rows classified.")
+        return
+
+    # Sanitise for Parquet (Athena doesn't support Python list columns)
+    df_s3 = df_classified.copy()
+    df_s3["categories"] = df_s3["categories"].apply(
+        lambda x: x if isinstance(x, str) else json.dumps(x)
+    )
+    if "txn_date" in df_s3.columns:
+        df_s3["txn_date"] = pd.to_datetime(df_s3["txn_date"]).dt.date.astype(str)
+
+    # ── Step 2: Upload classified SMS to S3 ──────────────────────────────
+    log.info("Step 2: Uploading classified SMS to S3...")
+    upload_df_to_s3(df_s3, S3_CLASSIFIED, "sms_classified")
+
+    # ── Step 3: Build features + upload to S3 ────────────────────────────
+    log.info("Step 3: Building features and uploading to S3...")
+    features = build_features(df_classified)
+
+    feat_s3 = features.copy()
+    for col in feat_s3.select_dtypes(include=["datetime64", "object"]).columns:
+        feat_s3[col] = feat_s3[col].astype(str)
+
+    upload_df_to_s3(feat_s3, S3_FEATURES, "borrower_sms_features")
+
+    # ── Step 4: Register Athena tables ────────────────────────────────────
+    log.info("Step 4: Registering Athena tables...")
+
+    # Build column definitions dynamically from DataFrames
+    def pandas_dtype_to_athena(dtype) -> str:
+        if pd.api.types.is_integer_dtype(dtype):   return "BIGINT"
+        if pd.api.types.is_float_dtype(dtype):     return "DOUBLE"
+        if pd.api.types.is_bool_dtype(dtype):      return "BOOLEAN"
+        return "STRING"
+
+    def make_athena_cols(df: pd.DataFrame) -> str:
+        return ",\n  ".join(
+            f"`{col}` {pandas_dtype_to_athena(df[col].dtype)}"
+            for col in df.columns
+        )
+
+    classified_cols = make_athena_cols(df_s3)
+    features_cols   = make_athena_cols(feat_s3)
+
+    # Athena connection
+    conn = athena_connect(
+        s3_staging_dir    = S3_ATHENA_RESULTS,
+        region_name       = AWS_REGION,
+        aws_access_key_id = AWS_ACCESS_KEY_ID,
+        aws_secret_access_key = AWS_SECRET_ACCESS_KEY,
+    )
+    cursor = conn.cursor()
+
+    # Create database
+    cursor.execute(f"CREATE DATABASE IF NOT EXISTS {ATHENA_DATABASE}")
+    log.info(f"  Database: {ATHENA_DATABASE}")
+
+    # Create sms_classified table
+    cursor.execute(f"DROP TABLE IF EXISTS {ATHENA_DATABASE}.sms_classified")
+    cursor.execute(f"""
+        CREATE EXTERNAL TABLE {ATHENA_DATABASE}.sms_classified (
+          {classified_cols}
+        )
+        STORED AS PARQUET
+        LOCATION '{S3_CLASSIFIED}'
+        TBLPROPERTIES ('parquet.compress'='SNAPPY')
+    """)
+    log.info("  ✅ Table registered: sms_classified")
+
+    # Create borrower_sms_features table
+    cursor.execute(f"DROP TABLE IF EXISTS {ATHENA_DATABASE}.borrower_sms_features")
+    cursor.execute(f"""
+        CREATE EXTERNAL TABLE {ATHENA_DATABASE}.borrower_sms_features (
+          {features_cols}
+        )
+        STORED AS PARQUET
+        LOCATION '{S3_FEATURES}'
+        TBLPROPERTIES ('parquet.compress'='SNAPPY')
+    """)
+    log.info("  ✅ Table registered: borrower_sms_features")
+
+    # ── Step 5: Validation summary ────────────────────────────────────────
+    log.info("Step 5: Validation summary...")
+    print("\n" + "=" * 60)
+    print("RISK FLAG DISTRIBUTION  (Athena)")
+    print("=" * 60)
+    cursor.execute(f"""
+        SELECT risk_flag,
+               COUNT(*) AS borrowers
+        FROM {ATHENA_DATABASE}.borrower_sms_features
+        GROUP BY 1
+        ORDER BY 2 DESC
+    """)
+    print(pd.DataFrame(cursor.fetchall(), columns=["risk_flag", "borrowers"]).to_string(index=False))
+
+    print("\n" + "=" * 60)
+    print("SMS CATEGORY BREAKDOWN  (Athena)")
+    print("=" * 60)
+    cursor.execute(f"""
+        SELECT sender_tag, COUNT(*) AS sms_count
+        FROM {ATHENA_DATABASE}.sms_classified
+        GROUP BY 1
+        ORDER BY 2 DESC
+    """)
+    print(pd.DataFrame(cursor.fetchall(), columns=["sender_tag", "sms_count"]).to_string(index=False))
+
+    cursor.close()
+    log.info(f"\n✅ Athena pipeline complete.")
+    log.info(f"   Query tables at: console.aws.amazon.com/athena → Database: {ATHENA_DATABASE}")
+    log.info(f"   S3 data location: {S3_PREFIX}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -364,7 +642,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SMS Feature Pipeline")
     parser.add_argument(
         "--backend",
-        choices=["postgres", "duckdb", "bigquery", "auto"],
+        choices=["postgres", "duckdb", "bigquery", "athena", "auto"],
         default="auto",
         help="Backend to use (default: auto-detect)"
     )
@@ -389,3 +667,5 @@ if __name__ == "__main__":
         run_postgres(csv)
     elif backend == "bigquery":
         run_bigquery(csv)
+    elif backend == "athena":
+        run_athena(csv)

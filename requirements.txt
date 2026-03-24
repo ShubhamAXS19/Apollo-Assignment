@@ -1,8 +1,18 @@
+# ── Core ─────────────────────────────────────────────────────────────────────
 pandas
 numpy
+python-dotenv
+
+# ── Local DB ─────────────────────────────────────────────────────────────────
+duckdb
 psycopg2-binary
+
+# ── GCP / BigQuery ────────────────────────────────────────────────────────────
 google-cloud-bigquery
 google-cloud-bigquery-storage
 pyarrow
 db-dtypes
-python-dotenv
+
+# ── AWS / Athena ──────────────────────────────────────────────────────────────
+boto3
+pyathena
