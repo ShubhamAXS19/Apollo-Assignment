@@ -66,31 +66,110 @@ def normalize_sender(sender: str) -> str:
     sender = sender.lower().strip()
 
     SENDER_MAP = {
-        # Banks
-        "hdfcbk": "BANK", "kotakb": "BANK", "icicib": "BANK",
-        "sbiinb": "BANK", "axisbk": "BANK", "pnbsms": "BANK",
-        "yesbnk": "BANK", "indbnk": "BANK", "boiind": "BANK",
-        "canbnk": "BANK", "unionb": "BANK", "centbk": "BANK",
-        "idbibk": "BANK", "bandhn": "BANK", "rblbnk": "BANK",
-        "scbnki": "BANK", "citibn": "BANK", "dcbbnk": "BANK",
-        "cbssbi": "BANK", "sbi":    "BANK", "pnb":    "BANK",
-        "hdfcbank": "BANK", "icici": "BANK", "aubank": "BANK",
-        "federl": "BANK", "kvbank": "BANK", "tjsb":   "BANK",
-        "saraswat": "BANK", "cosmos": "BANK", "nkgsb": "BANK",
-        # UPI / Wallets
+        # ── Public Sector Banks ────────────────────────────────────────────
+        "sbiinb": "BANK", "sbibnk": "BANK", "sbiupi": "BANK",
+        "sbicrd": "BANK", "sbipsg": "BANK", "sbyono": "BANK",
+        "atmsbi": "BANK", "cbssbi": "BANK", "sbi":    "BANK",
+        "pnbsms": "BANK", "pnb":    "BANK",
+        "canbnk": "BANK", "boiind": "BANK",
+        "bobsms": "BANK", "bobtxn": "BANK", "bobcrd": "BANK",
+        "unionb": "BANK", "centbk": "BANK", "indbnk": "BANK",
+        "iobchn": "BANK", "ucobnk": "BANK",
+        # ── Private Sector Banks ──────────────────────────────────────────
+        "hdfcbk": "BANK", "hdfcbn": "BANK", "hdfcbank": "BANK",
+        "icicit": "BANK", "icicib": "BANK", "icicio": "BANK",
+        "icicil": "BANK", "icici":  "BANK",
+        "kotakb": "BANK", "kotaka": "BANK",
+        "axisbk": "BANK", "axismr": "BANK", "axisgp": "BANK",
+        "yesbnk": "BANK", "indusb": "BANK",
+        "idfcfb": "BANK", "fedbnk": "BANK", "federl": "BANK",
+        "idbibk": "BANK", "rblbnk": "BANK", "rblcrd": "BANK",
+        "bandhn": "BANK", "bdnsms": "BANK",
+        "scbnki": "BANK", "scbank": "BANK",
+        "citibn": "BANK", "dcbbnk": "BANK",
+        "hsbcin": "BANK", "dbsbnk": "BANK",
+        # ── Small Finance / Regional / Co-op Banks ────────────────────────
+        "aubank": "BANK", "ujjivn": "BANK", "equtas": "BANK",
+        "equtat": "BANK", "finobk": "BANK", "utkbnk": "BANK",
+        "kvbank": "BANK", "kvbupi": "BANK", "kvgbbk": "BANK",
+        "tjsb":   "BANK", "saraswat": "BANK", "sarbnk": "BANK",
+        "cosmos": "BANK", "nkgsb":  "BANK",
+        "kblbnk": "BANK", "kgbank": "BANK",
+        "jrgbnk": "BANK", "mahabk": "BANK",
+        "cubltd": "BANK", "cubank": "BANK",
+        "tmbank": "BANK", "dhanbk": "BANK",
+        "csbbnk": "BANK", "sibsms": "BANK",
+        "ssfbnk": "BANK", "sbpdcl": "BANK",
+        "fedfib": "BANK",
+        # ── Payments Banks ────────────────────────────────────────────────
+        "airbnk": "BANK", "ipbmsg": "BANK",
+        "nsdlpb": "BANK", "pytmbk": "BANK",
+        # ── HDFC / ICICI / SBI subsidiaries ───────────────────────────────
+        "hdbfsl": "LENDER",  # HDB Financial Services (HDFC NBFC arm)
+        # ── UPI / Wallets / Payment Apps ──────────────────────────────────
         "jiopay": "UPI",  "airtel": "UPI",  "paytmb": "UPI",
-        "gpay":   "UPI",  "phonepe":"UPI",  "bhimupi":"UPI",
+        "gpay":   "UPI",  "phonepe":"UPI",  "phonpe": "UPI",
+        "bhimupi":"UPI",  "bhrtpe": "UPI",
         "mobikw": "UPI",  "amazon": "UPI",  "freecharge": "UPI",
-        # NBFCs / Lenders / Fintech
-        "bajfin": "LENDER", "ltfin":  "LENDER", "muthoo": "LENDER",
-        "kreditb":"LENDER", "nirafc": "LENDER", "cashe":  "LENDER",
-        "earncl": "LENDER", "moneyv": "LENDER", "stashf": "LENDER",
+        "rzrpay": "UPI",  "ipaytm": "UPI",
+        "pai247": "UPI",  "papape": "UPI",
+        "inmony": "UPI",  "inmny":  "UPI",
+        "atrupe": "UPI",  "postpe": "UPI",
+        "payzap": "UPI",
+        # ── NBFCs / Lenders / Fintech ─────────────────────────────────────
+        "bajajf": "LENDER", "bajajp": "LENDER",
+        "bajfin": "LENDER", "ltfin":  "LENDER", "lntfin": "LENDER",
+        "muthoo": "LENDER", "mutfcl": "LENDER",
+        "kreditb":"LENDER", "nirafc": "LENDER", "nirafn": "LENDER",
+        "cashe":  "LENDER", "casheb": "LENDER",
+        "earncl": "LENDER", "moneyv": "LENDER", "monvew": "LENDER",
+        "stashf": "LENDER", "stsfin": "LENDER", "stshfn": "LENDER", "stasfn": "LENDER",
         "smccfl": "LENDER", "pfiltm": "LENDER", "afiltm": "LENDER",
-        "gsfnce": "LENDER", "620016": "LENDER", "fattak": "LENDER",
-        "fatak":  "LENDER", "mpokkt": "LENDER", "navi":   "LENDER",
-        "zestmn": "LENDER", "fibe":   "LENDER", "monedo": "LENDER",
-        "kissht": "LENDER", "indifi": "LENDER", "lendng": "LENDER",
+        "gsfnce": "LENDER", "620016": "LENDER",
+        "fattak": "LENDER", "fatak":  "LENDER", "fatakm": "LENDER", "fatakc": "LENDER",
+        "mpokkt": "LENDER", "navi":   "LENDER", "navihq": "LENDER",
+        "naviln": "LENDER", "navicl": "LENDER",
+        "zestmn": "LENDER", "fibe":   "LENDER", "fibetm": "LENDER",
+        "monedo": "LENDER", "kissht": "LENDER",
+        "indifi": "LENDER", "lendng": "LENDER",
         "payltr": "LENDER", "slncrd": "LENDER", "smfgfi": "LENDER",
+        # KreditBee variants
+        "krrbee": "LENDER", "krzbee": "LENDER", "krdbee": "LENDER",
+        "krbeee": "LENDER", "kredto": "LENDER", "kredbe": "LENDER",
+        "kretbe": "LENDER",
+        # DMI Finance variants
+        "dmifnc": "LENDER", "dmicom": "LENDER", "dminbf": "LENDER",
+        # TVS Credit variants
+        "tvscsl": "LENDER", "tvscss": "LENDER", "tvscsp": "LENDER",
+        # Hero FinCorp
+        "herfnc": "LENDER", "herofi": "LENDER", "hrfinc": "LENDER",
+        # BFDL (Bharat Financial / BFIL)
+        "bfdlts": "LENDER", "bfdlps": "LENDER", "bfdlmt": "LENDER",
+        # Muthoot / Manappuram variants
+        "mafild": "LENDER", "mafilr": "LENDER", "mafilg": "LENDER",
+        # Other lending / fintech
+        "vivifi": "LENDER", "trcred": "LENDER", "rredee": "LENDER",
+        "inncrd": "LENDER", "incred": "LENDER",
+        "lnplte": "LENDER", "lenpte": "LENDER", "lnfrnt": "LENDER",
+        "onemny": "LENDER", "istmon": "LENDER", "istmny": "LENDER",
+        "housng": "LENDER", "homecr": "LENDER",
+        "ramfcp": "LENDER", "rupsml": "LENDER", "ruptm":  "LENDER",
+        "rpdmny": "LENDER", "capnow": "LENDER",
+        "smcoin": "LENDER", "kcredt": "LENDER", "lnditt": "LENDER",
+        "jaifnn": "LENDER", "bdylon": "LENDER",
+        "cfltd":  "LENDER",  # Cholamandalam Finance
+        "abfncs": "LENDER",  # Aditya Birla Finance
+        "iiflfn": "LENDER",  # IIFL Finance
+        "fimony": "LENDER", "vtraki": "LENDER",
+        "tblnce": "LENDER", "loan12": "LENDER",
+        "snpmnt": "LENDER",  # SnapMint
+        "credin": "LENDER", "onecrd": "LENDER",
+        "angone": "LENDER",  # Angel One
+        "bseltd": "LENDER",  # BSE Ltd
+        # UPI-linked lending / BNPL
+        "lzypay": "LENDER", "lazpay": "LENDER",
+        "mnytap": "LENDER", "paysns": "LENDER",
+        "pcktly": "LENDER", "pktlyy": "LENDER",
         # OTP senders (drop these)
         "blinkr": "OTP_SENDER",
     }
@@ -100,18 +179,22 @@ def normalize_sender(sender: str) -> str:
         return SENDER_MAP[sender]
 
     # ── Keyword-based fallback for unknown senders ──────────────────────
-    # Bank keywords
     BANK_KEYWORDS = [
         "bank", "sbi", "hdfc", "icici", "axis", "kotak", "pnb", "bob",
         "bnk", "bk", "federal", "union", "canara", "central", "indian",
         "syndicate", "corporation", "allahabad", "vijaya", "dena",
+        "idfc", "baroda", "punjab",
     ]
-    UPI_KEYWORDS  = ["pay", "upi", "wallet", "cash", "money", "gpay", "phone"]
+    UPI_KEYWORDS = [
+        "pay", "upi", "wallet", "cash", "money", "gpay", "phone",
+        "razr", "bhim", "payz", "lazy",
+    ]
     LENDER_KEYWORDS = [
         "fin", "loan", "credit", "lend", "capital", "invest", "nbfc",
         "finance", "fincorp", "finserv", "microfi", "mfi",
+        "kred", "emi", "rupee",
     ]
-    OTP_KEYWORDS  = ["otp", "auth", "verify", "secure", "2fa"]
+    OTP_KEYWORDS = ["otp", "auth", "verify", "secure", "2fa"]
 
     if any(k in sender for k in OTP_KEYWORDS):
         return "OTP_SENDER"
@@ -122,7 +205,6 @@ def normalize_sender(sender: str) -> str:
     if any(k in sender for k in UPI_KEYWORDS):
         return "UPI"
 
-    # Last resort: if body has strong financial signals, treat as BANK
     return "OTHER"
 
 
@@ -320,7 +402,8 @@ def is_excluded(body: str) -> bool:
     if not body or not isinstance(body, str):
         return True
     body_lower = body.lower()
-    
+    return any(kw in body_lower for kw in GLOBAL_EXCLUSION_KEYWORDS)
+
 def classify_sms(sender_tag: str, body: str) -> list[str]:
     """
     Returns a list of matching category labels for this SMS.
